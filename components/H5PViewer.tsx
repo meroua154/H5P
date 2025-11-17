@@ -12,6 +12,7 @@ interface H5PViewerProps {
 export default function H5PViewer({ moduleId }: H5PViewerProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [viewerUrl, setViewerUrl] = useState('');
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
@@ -24,25 +25,31 @@ export default function H5PViewer({ moduleId }: H5PViewerProps) {
     setError('');
 
     try {
-      // 1️⃣ Extraction du module H5P
+      // 1. S'assurer que le viewer existe
       const extractRes = await fetch(`/api/h5p/extract/${moduleId}`);
       if (!extractRes.ok) {
         const errorData = await extractRes.json();
-        throw new Error(errorData.error || `Erreur extraction HTTP: ${extractRes.status}`);
-      }
-      
-      const extractData = await extractRes.json();
-      if (!extractData.success) {
-        throw new Error(extractData.error || 'Échec de l\'extraction');
+        throw new Error(errorData.error || 'Erreur extraction');
       }
 
-      // 2️⃣ Charger le viewer.html dans l'iframe
-      // Attendre un peu pour s'assurer que les fichiers sont prêts
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // 2. Récupérer l'URL du viewer depuis Blob
+      const blobRes = await fetch(`/api/h5p/blob-url?moduleId=${moduleId}`);
+      if (!blobRes.ok) {
+        throw new Error('Impossible de récupérer l\'URL du viewer');
+      }
+
+      const blobData = await blobRes.json();
       
+      // Construire l'URL du viewer
+      const viewerBlobUrl = `${blobData.baseUrl.replace('/content', '')}/viewer.html`;
+      
+      console.log('🎬 URL Viewer:', viewerBlobUrl);
+      
+      setViewerUrl(viewerBlobUrl);
       setLoading(false);
+
     } catch (err: any) {
-      console.error('Erreur initialisation H5P:', err);
+      console.error('❌ Erreur initialisation H5P:', err);
       setError(err.message || 'Erreur inconnue');
       setLoading(false);
     }
@@ -53,7 +60,6 @@ export default function H5PViewer({ moduleId }: H5PViewerProps) {
       <div className="flex flex-col items-center justify-center h-[600px] bg-gray-50 rounded-xl">
         <Loader2 className="w-12 h-12 text-indigo-600 animate-spin mb-4" />
         <p className="text-gray-600">Préparation du contenu H5P...</p>
-        <p className="text-sm text-gray-400 mt-2">Extraction et configuration en cours</p>
       </div>
     );
   }
@@ -78,7 +84,7 @@ export default function H5PViewer({ moduleId }: H5PViewerProps) {
     <div className="w-full h-[600px] bg-white border rounded-xl shadow-inner overflow-hidden">
       <iframe
         ref={iframeRef}
-        src={`/h5p-modules/${moduleId}/viewer.html`}
+        src={viewerUrl}
         className="w-full h-full border-0"
         title="H5P Content Viewer"
         sandbox="allow-scripts allow-same-origin allow-forms"

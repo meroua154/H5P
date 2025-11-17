@@ -1,11 +1,9 @@
 // app/api/h5p/upload/route.ts
 
 import { NextResponse } from 'next/server';
-import { writeFile, mkdir } from 'fs/promises';
-import path from 'path';
+import { put } from '@vercel/blob';
 import AdmZip from 'adm-zip';
 
-// Obligatoire en Next.js 13+ pour pouvoir lire formData()
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
@@ -19,21 +17,18 @@ export async function POST(request: Request) {
 
     // Convertir File → Buffer
     const buffer = Buffer.from(await file.arrayBuffer());
-
-    // GENERER UN ID UNIQUE
+    
+    // Générer ID unique
     const moduleId = `module-${Date.now()}`;
 
-    // public/h5p-modules/module-xxxxxx
-    const modulePath = path.join(process.cwd(), 'public', 'h5p-modules', moduleId);
-    await mkdir(modulePath, { recursive: true });
+    // 1. Upload du fichier .h5p original vers Vercel Blob
+    const h5pBlob = await put(`h5p-modules/${moduleId}/content.h5p`, buffer, {
+      access: 'public',
+      addRandomSuffix: false,
+    });
 
-    // Sauvegarder le fichier brut .h5p
-    await writeFile(path.join(modulePath, 'content.h5p'), buffer);
-
-    // Extraire zip
+    // 2. Extraire et lire métadonnées
     const zip = new AdmZip(buffer);
-
-    // Lire métadonnées du fichier h5p.json
     let metadata: any = { title: "Module H5P" };
 
     try {
@@ -45,21 +40,36 @@ export async function POST(request: Request) {
       console.log("⚠️ Impossible de lire h5p.json");
     }
 
-    // Sauvegarder metadata.json
-    await writeFile(
-      path.join(modulePath, 'metadata.json'),
-      JSON.stringify(
-        {
-          moduleId,
-          metadata,
-          uploadDate: new Date().toISOString()
-        },
-        null,
-        2
-      )
-    );
+    // 3. Upload metadata.json vers Vercel Blob
+    const metadataContent = JSON.stringify({
+      moduleId,
+      metadata,
+      uploadDate: new Date().toISOString(),
+      h5pUrl: h5pBlob.url
+    }, null, 2);
 
-    console.log(`✅ Module sauvegardé: ${moduleId}`);
+    await put(`h5p-modules/${moduleId}/metadata.json`, metadataContent, {
+      access: 'public',
+      addRandomSuffix: false,
+      contentType: 'application/json',
+    });
+
+    // 4. Upload des fichiers extraits (h5p.json, content.json, etc.)
+    const entries = zip.getEntries();
+    
+    for (const entry of entries) {
+      if (entry.isDirectory) continue;
+      
+      const filePath = `h5p-modules/${moduleId}/content/${entry.entryName}`;
+      const fileData = entry.getData();
+      
+      await put(filePath, fileData, {
+        access: 'public',
+        addRandomSuffix: false,
+      });
+    }
+
+    console.log(`✅ Module uploadé vers Blob: ${moduleId}`);
 
     return NextResponse.json({
       success: true,
@@ -69,6 +79,7 @@ export async function POST(request: Request) {
       },
       uploadDate: new Date().toISOString()
     });
+
   } catch (error: any) {
     console.error("❌ Erreur upload:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });

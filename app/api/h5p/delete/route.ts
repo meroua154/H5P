@@ -1,62 +1,47 @@
 // app/api/h5p/delete/route.ts
 
 import { NextResponse } from 'next/server';
-import { rm, access } from 'fs/promises';
-import path from 'path';
+import { del, list } from '@vercel/blob';
 
 export const dynamic = "force-dynamic";
 
 export async function DELETE(request: Request) {
   try {
-    // Récupérer le moduleId depuis l'URL
     const { searchParams } = new URL(request.url);
     const moduleId = searchParams.get('moduleId');
 
-    console.log('🗑️ DELETE Request reçue');
-    console.log('📋 URL complète:', request.url);
-    console.log('🆔 Module ID extrait:', moduleId);
+    console.log('🗑️ DELETE Request pour:', moduleId);
 
     if (!moduleId || moduleId.trim() === '') {
-      console.error('❌ ID manquant ou invalide');
       return NextResponse.json(
-        { success: false, error: 'ID du module manquant ou invalide' },
+        { success: false, error: 'ID du module manquant' },
         { status: 400 }
       );
     }
 
-    const modulePath = path.join(
-      process.cwd(),
-      'public',
-      'h5p-modules',
-      moduleId
-    );
+    // Lister tous les fichiers du module
+    const { blobs } = await list({
+      prefix: `h5p-modules/${moduleId}/`,
+    });
 
-    console.log('📂 Chemin de suppression:', modulePath);
-
-    // Vérifier si le module existe
-    try {
-      await access(modulePath);
-      console.log('✅ Module trouvé');
-    } catch {
-      console.error('❌ Module introuvable:', moduleId);
+    if (blobs.length === 0) {
       return NextResponse.json(
-        {
-          success: false,
-          error: `Module ${moduleId} introuvable`
-        },
+        { success: false, error: `Module ${moduleId} introuvable` },
         { status: 404 }
       );
     }
 
-    // Supprime tout le dossier du module
-    await rm(modulePath, { recursive: true, force: true });
+    // Supprimer tous les fichiers du module
+    const urls = blobs.map(blob => blob.url);
+    await del(urls);
 
-    console.log('✅ Module supprimé avec succès:', moduleId);
+    console.log(`✅ Module supprimé de Blob: ${moduleId}`);
 
     return NextResponse.json({
       success: true,
       message: `Module ${moduleId} supprimé avec succès`,
-      moduleId: moduleId
+      moduleId: moduleId,
+      deletedFiles: urls.length
     }, { 
       status: 200,
       headers: {
@@ -65,12 +50,12 @@ export async function DELETE(request: Request) {
     });
 
   } catch (err: any) {
-    console.error('❌ Erreur lors de la suppression:', err);
+    console.error('❌ Erreur suppression:', err);
     
     return NextResponse.json(
       {
         success: false,
-        error: err.message || 'Erreur lors de la suppression du module',
+        error: err.message || 'Erreur lors de la suppression',
         details: err.stack
       },
       { 

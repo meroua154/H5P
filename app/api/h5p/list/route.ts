@@ -1,10 +1,9 @@
 // app/api/h5p/list/route.ts
 
 import { NextResponse } from 'next/server';
-import { readdir, readFile } from 'fs/promises';
-import path from 'path';
+import { list } from '@vercel/blob';
 
-export const dynamic = "force-dynamic"; // Pour désactiver le cache et toujours lister à jour
+export const dynamic = "force-dynamic";
 
 interface H5PModule {
   moduleId: string;
@@ -14,30 +13,23 @@ interface H5PModule {
 
 export async function GET() {
   try {
-    const modulesDir = path.join(process.cwd(), 'public', 'h5p-modules');
+    // Lister tous les fichiers dans h5p-modules/
+    const { blobs } = await list({
+      prefix: 'h5p-modules/',
+    });
 
-    let moduleIds: string[] = [];
-    try {
-      const dirents = await readdir(modulesDir, { withFileTypes: true });
-      moduleIds = dirents
-        .filter((dirent) => dirent.isDirectory())
-        .map((dirent) => dirent.name);
-    } catch (e: any) {
-      if (e.code === 'ENOENT') {
-        // Aucun module encore uploadé
-        return NextResponse.json({ success: true, modules: [] });
-      }
-      throw e;
-    }
+    // Filtrer les metadata.json
+    const metadataBlobs = blobs.filter(blob => 
+      blob.pathname.endsWith('/metadata.json')
+    );
 
     const modules: H5PModule[] = [];
 
-    for (const id of moduleIds) {
-      const metadataPath = path.join(modulesDir, id, 'metadata.json');
-
+    // Récupérer chaque metadata
+    for (const blob of metadataBlobs) {
       try {
-        const metadataFile = await readFile(metadataPath, 'utf8');
-        const metadataJson = JSON.parse(metadataFile);
+        const response = await fetch(blob.url);
+        const metadataJson = await response.json();
 
         modules.push({
           moduleId: metadataJson.moduleId,
@@ -45,8 +37,7 @@ export async function GET() {
           uploadDate: metadataJson.uploadDate,
         });
       } catch (error) {
-        console.error(`❌ Erreur lecture metadata pour module ${id}:`, error);
-        // Continue avec les autres modules
+        console.error(`❌ Erreur lecture metadata ${blob.pathname}:`, error);
       }
     }
 
@@ -55,10 +46,10 @@ export async function GET() {
       modules,
     });
 
-  } catch (error) {
-    console.error('❌ Erreur serveur list modules H5P:', error);
+  } catch (error: any) {
+    console.error('❌ Erreur list modules:', error);
     return NextResponse.json(
-      { error: 'Erreur interne serveur.' },
+      { error: error.message || 'Erreur interne serveur.' },
       { status: 500 }
     );
   }
