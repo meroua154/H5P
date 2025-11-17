@@ -1,0 +1,6 @@
+node_modules 
+.next 
+.env.local 
+public/h5p-modules/* 
+!public/h5p-modules/.gitkeep 
+.DS_Store 
